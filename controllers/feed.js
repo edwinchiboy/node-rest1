@@ -38,8 +38,7 @@ const e = require("express");
 exports.getPosts = async (req, res, next) => {
   const currentPage = req.query.page || 1;
   const perPage = 2;
-  let totalItems;
-
+  
   const totalItems = await Post.find().countDocuments();
   const Posts = Post.find()
     .skip((currentPage - 1) * perPage)
