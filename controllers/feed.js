@@ -63,63 +63,129 @@ exports.getPosts = async (req, res, next) => {
   }
 };
 
-exports.createPost = (req, res, next) => {
+// exports.createPost = (req, res, next) => {
+//   const errors = validationResult(req);
+//   if (!errors.isEmpty()) {
+//     const error = new Error("Validation failed, entered data is incorrect.");
+//     error.statusCode = 422;
+//     throw error;
+//   }
+//   if (!req.file) {
+//     const error = new Error("No image provided.");
+//     error.statusCode = 422;
+//     throw error;
+//   }
+//   const imageUrl = req.file.path.replace("\\", "/");
+//   const title = req.body.title;
+//   const content = req.body.content;
+//   let creator;
+//   const post = new Post({
+//     title: title,
+//     content: content,
+//     imageUrl: imageUrl,
+//     creator: req.userId,
+//   });
+//   post
+//     .save()
+//     .then((result) => {
+//       User.findById(req.userId)
+//         .then((user) => {
+//           if (!user) {
+//             const error = new Error("User not found.");
+//             error.statusCode = 404;
+//             throw error;
+//           }
+//           creator = user;
+//           user.posts.push(post);
+//           return user.save();
+//         })
+//         .then((post) => {
+//           io.getIO().emit("posts", {
+//             action: "create",
+//             post: {
+//               ...post._doc,
+//               creator: { _id: req.userId, name: creator.name },
+//             },
+//           });
+//           res.status(201).json({
+//             message: "Post created successfully",
+//             post: post,
+//             creator: creator,
+//           });
+//         });
+//     })
+//     .catch((err) => {
+//       if (!err.statusCode) {
+//         err.statusCode = 500;
+//       }
+//       next(err);
+//     });
+// };
+
+exports.createPost = async (req, res, next) => {
+  // 1. Validate request body inputs
   const errors = validationResult(req);
   if (!errors.isEmpty()) {
     const error = new Error("Validation failed, entered data is incorrect.");
     error.statusCode = 422;
     throw error;
   }
+
+  // 2. Validate uploaded file
   if (!req.file) {
     const error = new Error("No image provided.");
     error.statusCode = 422;
     throw error;
   }
+
   const imageUrl = req.file.path.replace("\\", "/");
-  const title = req.body.title;
-  const content = req.body.content;
-  let creator;
-  const post = new Post({
-    title: title,
-    content: content,
-    imageUrl: imageUrl,
-    creator: req.userId,
-  });
-  post
-    .save()
-    .then((result) => {
-      User.findById(req.userId)
-        .then((user) => {
-          if (!user) {
-            const error = new Error("User not found.");
-            error.statusCode = 404;
-            throw error;
-          }
-          creator = user;
-          user.posts.push(post);
-          return user.save();
-        })
-        .then((post) => {
-          io.getIO().emit("posts", {
-            action: "create",
-            post: {
-              ...post._doc,
-              creator: { _id: req.userId, name: creator.name },
-            },
-          });
-          res.status(201).json({
-            message: "Post created successfully",
-            post: post,
-            creator: creator,
-          });
-        });
-    })
-    .catch((err) => {
-      if (!err.statusCode) {
-        err.statusCode = 500;
-      }
-      next(err);
+  const { title, content } = req.body;
+
+  try {
+    // 3. Create and save the new post instance
+    const post = new Post({
+      title: title,
+      content: content,
+      imageUrl: imageUrl,
+      creator: req.userId,
     });
+    const savedPost = await post.save();
+
+    // 4. Find the authenticated user
+    const user = await User.findById(req.userId);
+    if (!user) {
+      const error = new Error("User not found.");
+      error.statusCode = 404;
+      throw error;
+    }
+
+    // 5. Establish the relation link and save the updated user model
+    user.posts.push(savedPost);
+    const savedUser = await user.save();
+
+    // 6. Broadcast the realtime notification event via Socket.io
+    io.getIO().emit("posts", {
+      action: "create",
+      post: {
+        ...savedPost._doc,
+        creator: { _id: req.userId, name: user.name },
+      },
+    });
+
+    // 7. Send back the creation response payload
+    res.status(201).json({
+      message: "Post created successfully",
+      post: savedPost,
+      creator: { _id: user._id, name: user.name },
+    });
+    return savedUser;
+  } catch (err) {
+    // 8. Catch database error bounds and forward to Express error handler
+    if (!err.statusCode) {
+      err.statusCode = 500;
+    }
+    next(err);
+  }
 };
 
 exports.getPost = (req, res, next) => {
